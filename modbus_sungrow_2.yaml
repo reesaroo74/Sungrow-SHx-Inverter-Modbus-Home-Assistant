@@ -2207,12 +2207,12 @@ template:
         availability: >-
           {{ 
           not is_state('sensor.battery_capacity_sgunit2', 'unavailable')
-          and not is_state('sensor.battery_level_nominal', 'unavailable')
+          and not is_state('sensor.battery_level_nominal_sgunit2', 'unavailable')
           }}
         state: >-
           {{
             ( states('sensor.battery_capacity_sgunit2') | float *
-            states('sensor.battery_level_nominal') | float / 100 )| round(1)
+            states('sensor.battery_level_nominal_sgunit2') | float / 100 )| round(1)
           }}
 
       - unique_id: battery_charge_sgunit2
@@ -2408,17 +2408,17 @@ automation:
     trigger:
       - platform: state
         entity_id:
-          - sensor.sungrow_inverter_state
+          - sensor.inverter_state_sgunit2
     condition:
       - condition: template
-        value_template: "{{ not is_state('sensor.sungrow_inverter_state', 'unavailable') }}"
+        value_template: "{{ not is_state('sensor.inverter_state_sgunit2', 'unavailable') }}"
     action:
       - service: input_select.select_option
         target:
           entity_id: input_select.set_inverter_run_mode_sgunit2
         data:
           option: >
-            {% if is_state('sensor.sungrow_inverter_state', "Stop") %}
+            {% if is_state('sensor.inverter_state_sgunit2', "Stop") %}
               Shutdown
             {% else %}
               Enabled

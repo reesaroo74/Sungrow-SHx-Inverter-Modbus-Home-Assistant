@@ -287,16 +287,24 @@ namespace TextParse.Commands
                     {"ems_mode_selection", $"ems_mode_selection_{UnitIdentifier}{index}"},
                     {"battery_forced_charge_discharge_cmd", $"battery_forced_charge_discharge_cmd_raw_{UnitIdentifier}{index}"},
                     {"sg_battery_level_nom", $"battery_level_nominal_{UnitIdentifier}{index}"},
+                    {"battery_level_nominal", $"battery_level_nominal_{UnitIdentifier}{index}"},
                     {"sg_battery_charge_nom", $"battery_charge_nominal_{UnitIdentifier}{index}"},
                     {"uid_daily_consumed_energy", $"daily_consumed_energy_{UnitIdentifier}{index}"},
                     {"uid_total_consumed_energy", $"total_consumed_energy_{UnitIdentifier}{index}"},
                     {"export_power_limit_mode", $"export_power_limit_mode_{UnitIdentifier}{index}"},
+                    {"sungrow_inverter_state", $"inverter_state_{UnitIdentifier}{index}"},
+                };
+
+                Dictionary<string, string> templateBinarySensorCustomSar = new Dictionary<string, string>
+                {
+                    {"sg_inverter_state", $"inverter_state_{UnitIdentifier}{index}"},
                 };
 
                 _replacements = new Dictionary<Sections, Dictionary<string, string>>
                 {
                     {Sections.Modbus, modbusCustomSar},
                     {Sections.TemplateSensor, templateSensorCustomSar},
+                    {Sections.TemplateBinarySensor, templateBinarySensorCustomSar},
                 };
 
                 string newFileName = Path.Combine(Path.GetDirectoryName(fileIn), Path.ChangeExtension($"modbus_sungrow_{index}", "yaml"));
@@ -421,7 +429,7 @@ namespace TextParse.Commands
 
         private string ParseLine(string line, int index, Sections section)
         {
-            if (line == "      - unique_id: sg_battery_level_nom")
+            if (line == "          - sensor.sungrow_inverter_state")
             {
                 int i = 0;
                 i++;
