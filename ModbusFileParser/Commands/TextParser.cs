@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 
@@ -7,7 +8,8 @@ namespace TextParse.Commands
 {
     public class TextParser
     {
-        private const string AutomaticIdPrefix = "- id:";
+        private const string AliasPrefix = "alias:";
+        private const string AutomaticIdPrefix = "id:";
         private const string AutomationIdNamePrefix = "automation_sungrow_";
         private const string ModbusHostIp = "sungrow_modbus_host_ip";
 
@@ -15,10 +17,13 @@ namespace TextParse.Commands
         private const string ModbusPort = "sungrow_modbus_port";
         private const string ModbusSlave = "sungrow_modbus_slave";
 
-        private const string NamePrefix = "- name:";
+        private const string NamePrefix = "name:";
+
         private const string SungrowIdPrefix = "sg_";
         private const string SungrowSetIdPrefix = "set_sg_";
         private const string UniqueIdPrefix = "unique_id:";
+
+        private const string UnitIdentifier = "sgunit";
 
         private static readonly List<string> _directConverts = new List<string>
         {
@@ -26,11 +31,6 @@ namespace TextParse.Commands
             ModbusHostIp,
             ModbusPort,
             ModbusSlave
-        };
-
-        private static readonly List<string> _addSpaceIndexAtEndAfterPrefix = new List<string>
-        {
-            NamePrefix
         };
 
         private Dictionary<Sections, Dictionary<string, string>> _replacements;
@@ -49,10 +49,80 @@ namespace TextParse.Commands
             }
         }
 
+        private string FixName(string line, string currentId, YamlReader yamlReader)
+        {
+            long currentPosition = yamlReader.Position;
+
+            if (string.IsNullOrEmpty(currentId))
+            {
+                string nextLine = yamlReader.ReadLine();
+
+                while (nextLine != null)
+                {
+                    if (nextLine.Trim().StartsWith($"- {UniqueIdPrefix}"))
+                    {
+                        currentId = GetId(line);
+                    }
+                    else if (line.Trim().StartsWith($"- {AutomaticIdPrefix}"))
+                    {
+                        currentId = GetAutomationId(line);
+                    }
+                    else if (line.Trim().StartsWith("- "))
+                    {
+                        yamlReader.Seek(currentPosition, SeekOrigin.Begin);
+
+                        return line;
+                    }
+
+                    nextLine = yamlReader.ReadLine();
+                }
+
+                // reset to the previous byte position
+                yamlReader.Seek(currentPosition, SeekOrigin.Begin);
+            }
+
+            if (string.IsNullOrEmpty(currentId))
+            {
+                yamlReader.Seek(currentPosition, SeekOrigin.Begin);
+
+                return line;
+            }
+
+            string prefix;
+
+            if (line.Trim().StartsWith(NamePrefix) || line.Trim().StartsWith($"- {NamePrefix}"))
+            {
+                prefix = NamePrefix;
+            }
+            else if (line.Trim().StartsWith(AliasPrefix) || line.Trim().StartsWith($"- {AliasPrefix}"))
+            {
+                prefix = AliasPrefix;
+            }
+            else
+            {
+                return line;
+            }
+
+            string[] split = line.Split(new[] {prefix}, StringSplitOptions.None);
+
+            string newName = currentId.Replace("_", " ");
+
+            if (newName.StartsWith("automation "))
+            {
+                newName = newName.Substring("automation ".Length);
+            }
+
+            TextInfo textInfo = new CultureInfo("en-AU", false).TextInfo;
+
+            newName = textInfo.ToTitleCase(newName);
+
+            return $"{split[0]}{prefix} {newName}";
+        }
+
         private string GetAutomationId(string line)
         {
             string[] split = line.Split(new[] {AutomaticIdPrefix}, StringSplitOptions.None);
-            
+
             return split.Length > 1 ? split[1].Trim().Trim('"') : string.Empty;
         }
 
@@ -68,7 +138,7 @@ namespace TextParse.Commands
             if (id.StartsWith(AutomationIdNamePrefix))
             {
                 string oldString = id.Substring(19).Trim();
-                string newString = $"automation_{oldString}_sg_{index}";
+                string newString = $"automation_{oldString}_{UnitIdentifier}{index}";
 
                 return newString;
             }
@@ -78,10 +148,19 @@ namespace TextParse.Commands
 
         private string GetNewId(string id, int index, Sections section)
         {
+            // test custom replacements
+            if (_replacements.TryGetValue(section, out Dictionary<string, string> replacements))
+            {
+                if (replacements.TryGetValue(id, out string replacement))
+                {
+                    return replacement;
+                }
+            }
+
             if (id.StartsWith(SungrowIdPrefix))
             {
                 string oldString = id.Substring(3).Trim();
-                string newString = $"{oldString}_sg_{index}";
+                string newString = $"{oldString}_{UnitIdentifier}{index}";
                 AddReplacement(oldString, newString, section);
 
                 return newString;
@@ -92,7 +171,7 @@ namespace TextParse.Commands
 
         private static string GetNewSetId(string id, int index)
         {
-            return $"set_{id.Substring(SungrowSetIdPrefix.Length)}_sg_{index}";
+            return $"set_{id.Substring(SungrowSetIdPrefix.Length)}_{UnitIdentifier}{index}";
         }
 
         private static string GetSectionHeader(Sections section)
@@ -121,93 +200,73 @@ namespace TextParse.Commands
             }
         }
 
-        private string ParseLine(string line, int index, Sections section)
+        public void ModbusChangeNameAndId(string fileIn, string fileOut, string nameToReplace, string replacementName, string idToReplace, string replacementId)
         {
-            if (line == "        value_template: \"{{ not is_state('sensor.ems_mode_selection', 'unavailable') }}\"")
+            using (YamlReader yamlReader = new YamlReader(fileIn))
             {
-                int i = 0;
-                i++;
-            }
-
-            if (section == Sections.None)
-            {
-                return line;
-            }
-
-            string directConvert = TestLineContainsDirectConvert(line);
-
-            if (!string.IsNullOrWhiteSpace(directConvert))
-            {
-                line = ReplaceAndAddToReplacements(line, section, directConvert, $"{directConvert}_{index}");
-            }
-
-            foreach (string prefix in _addSpaceIndexAtEndAfterPrefix)
-            {
-                // also test that this line doesn't include a direct convert!
-                if (line.Trim().StartsWith(prefix) && string.IsNullOrWhiteSpace(TestLineContainsDirectConvert(line)))
+                using (StreamWriter streamWriter = new StreamWriter(fileOut))
                 {
-                    line = line.TrimEnd() + $" {index}";
+                    string line = yamlReader.ReadLine();
+
+                    while (line != null)
+                    {
+                        line = line.Replace(nameToReplace, replacementName).Replace(idToReplace, replacementId);
+
+                        streamWriter.WriteLine(line);
+
+                        line = yamlReader.ReadLine();
+                    }
+                }
+            }
+        }
+
+        public void ModbusFileFixNames(string fileIn)
+        {
+            string newFileName = Path.GetTempFileName();
+
+            using (YamlReader yamlReader = new YamlReader(fileIn))
+            {
+                string currentId = string.Empty;
+
+                using (StreamWriter streamWriter = new StreamWriter(newFileName))
+                {
+                    string line = yamlReader.ReadLine();
+
+                    while (line != null)
+                    {
+                        if (line.Trim().StartsWith($"- {UniqueIdPrefix}"))
+                        {
+                            currentId = GetId(line);
+                        }
+                        else if (line.Trim().StartsWith($"- {AutomaticIdPrefix}"))
+                        {
+                            currentId = GetAutomationId(line);
+                        }
+                        else if (line.Trim().StartsWith("- "))
+                        {
+                            currentId = string.Empty;
+                        }
+
+                        if (line.Trim().StartsWith(NamePrefix) || line.Trim().StartsWith($"- {NamePrefix}") || line.Trim().StartsWith(AliasPrefix) || line.Trim().StartsWith($"- {AliasPrefix}"))
+                        {
+                            line = FixName(line, currentId, yamlReader);
+                        }
+
+                        streamWriter.WriteLine(line);
+
+                        line = yamlReader.ReadLine();
+                    }
                 }
             }
 
-            if (line.Trim().StartsWith(UniqueIdPrefix) || line.Trim().StartsWith($"- {UniqueIdPrefix}"))
+            if (File.Exists(newFileName))
             {
-                string id = GetId(line);
-
-                string newId = GetNewId(id, index, section);
-
-                line = ReplaceAndAddToReplacements(line, section, id, newId);
+                File.Delete(fileIn);
+                File.Copy(newFileName, fileIn);
             }
-
-            switch (section)
-            {
-                case Sections.Modbus:
-                    // should be no replacements
-                    break;
-                case Sections.Template:
-                case Sections.TemplateBinarySensor:
-                case Sections.TemplateSensor:
-                    line = TestReplacements(line, Sections.Modbus | Sections.TemplateSensor | Sections.TemplateBinarySensor);
-
-                    break;
-                case Sections.InputNumber:
-                case Sections.InputSelect:
-                    if (line.StartsWith($"  {SungrowSetIdPrefix}"))
-                    {
-                        string id = line.Trim().TrimEnd(':');
-
-                        string newId = GetNewSetId(id, index);
-
-                        line = ReplaceAndAddToReplacements(line, section, id, newId);
-                    }
-                    else
-                    {
-                        line = TestReplacements(line, Sections.Modbus | Sections.TemplateSensor | Sections.TemplateBinarySensor | Sections.InputNumber);
-                    }
-
-                    break;
-                case Sections.Automation:
-                    if (line.Trim().StartsWith($"{AutomaticIdPrefix} \"{AutomationIdNamePrefix}") || line.Trim().StartsWith($"{AutomaticIdPrefix} {AutomationIdNamePrefix}"))
-                    {
-                        string id = GetAutomationId(line);
-                        string newId = GetNewAutomationId(id, index);
-
-                        line = ReplaceAndAddToReplacements(line, section, id, newId);
-                    }
-                    else
-                    {
-                        line = TestReplacements(line, Sections.Modbus | Sections.TemplateSensor | Sections.TemplateBinarySensor | Sections.InputNumber | Sections.InputSelect | Sections.Automation);
-                    }
-
-                    break;
-                default:
-                    throw new ArgumentOutOfRangeException(nameof(section), section, null);
-            }
-
-            return line;
         }
 
-        public void ParseModbusFile(string fileIn)
+        public void ModbusFileParse(string fileIn)
         {
             Sections currentSection = Sections.None;
 
@@ -219,14 +278,19 @@ namespace TextParse.Commands
 
                 Dictionary<string, string> modbusCustomSar = new Dictionary<string, string>
                 {
-                    {"sungrow_device_type_code", $"dev_code_sg_{index}"},
-                    {"export_power_raw", $"battery_export_power_raw_sg_{index}"}
+                    {"sungrow_device_type_code", $"dev_code_{UnitIdentifier}{index}"},
+                    {"export_power_raw", $"battery_export_power_raw_{UnitIdentifier}{index}"}
                 };
 
                 Dictionary<string, string> templateSensorCustomSar = new Dictionary<string, string>
                 {
-                        {"ems_mode_selection", $"ems_mode_selection_sg_{index}"},
-                    {"battery_forced_charge_discharge_cmd", $"battery_forced_charge_discharge_cmd_raw_sg_{index}"},
+                    {"ems_mode_selection", $"ems_mode_selection_{UnitIdentifier}{index}"},
+                    {"battery_forced_charge_discharge_cmd", $"battery_forced_charge_discharge_cmd_raw_{UnitIdentifier}{index}"},
+                    {"sg_battery_level_nom", $"battery_level_nominal_{UnitIdentifier}{index}"},
+                    {"sg_battery_charge_nom", $"battery_charge_nominal_{UnitIdentifier}{index}"},
+                    {"uid_daily_consumed_energy", $"daily_consumed_energy_{UnitIdentifier}{index}"},
+                    {"uid_total_consumed_energy", $"total_consumed_energy_{UnitIdentifier}{index}"},
+                    {"export_power_limit_mode", $"export_power_limit_mode_{UnitIdentifier}{index}"},
                 };
 
                 _replacements = new Dictionary<Sections, Dictionary<string, string>>
@@ -237,11 +301,11 @@ namespace TextParse.Commands
 
                 string newFileName = Path.Combine(Path.GetDirectoryName(fileIn), Path.ChangeExtension($"modbus_sungrow_{index}", "yaml"));
 
-                using (StreamReader streamReader = new StreamReader(fileIn))
+                using (YamlReader yamlReader = new YamlReader(fileIn))
                 {
                     using (StreamWriter streamWriter = new StreamWriter(newFileName))
                     {
-                        string line = streamReader.ReadLine();
+                        string line = yamlReader.ReadLine();
 
                         while (line != null)
                         {
@@ -252,26 +316,21 @@ namespace TextParse.Commands
                                 currentSection = section;
                             }
 
-                            string newLine = ParseLine(line, index, currentSection);
-                            streamWriter.WriteLine(newLine);
+                            line = ParseLine(line, index, currentSection);
 
-                            line = streamReader.ReadLine();
+                            streamWriter.WriteLine(line);
+
+                            line = yamlReader.ReadLine();
                         }
                     }
                 }
+
+                ModbusFileFixNames(newFileName);
             }
         }
 
-        private string ReplaceAndAddToReplacements(string line, Sections section, string oldString, string newString)
+        public bool ModbusFileReverseNameAndId(string fileIn, string fileOut)
         {
-            AddReplacement(oldString, newString, section);
-
-            return line.Replace(oldString, newString);
-        }
-
-        public bool ReverseNameAndId(string fileIn, string fileOut)
-        {
-            const string namePrefix = "name: ";
             const string uniqueIdPrefix = "unique_id: ";
             const string deviceAddressPrefix = "device_address: ";
 
@@ -285,7 +344,7 @@ namespace TextParse.Commands
 
                         while (line1 != null)
                         {
-                            if (line1.Trim().StartsWith($"- {namePrefix}"))
+                            if (line1.Trim().StartsWith($"- {NamePrefix}"))
                             {
                                 string line2 = streamReader.ReadLine();
 
@@ -360,6 +419,90 @@ namespace TextParse.Commands
             }
         }
 
+        private string ParseLine(string line, int index, Sections section)
+        {
+            if (line == "      - unique_id: sg_battery_level_nom")
+            {
+                int i = 0;
+                i++;
+            }
+
+            if (section == Sections.None)
+            {
+                return line;
+            }
+
+            string directConvert = TestLineContainsDirectConvert(line);
+
+            if (!string.IsNullOrWhiteSpace(directConvert))
+            {
+                line = ReplaceAndAddToReplacements(line, section, directConvert, $"{directConvert}_{index}");
+            }
+
+            if (line.Trim().StartsWith(UniqueIdPrefix) || line.Trim().StartsWith($"- {UniqueIdPrefix}"))
+            {
+                string id = GetId(line);
+
+                string newId = GetNewId(id, index, section);
+
+                line = ReplaceAndAddToReplacements(line, section, id, newId);
+            }
+
+            switch (section)
+            {
+                case Sections.Modbus:
+                    // should be no replacements
+                    break;
+                case Sections.Template:
+                case Sections.TemplateBinarySensor:
+                case Sections.TemplateSensor:
+                    line = TestReplacements(line, Sections.Modbus | Sections.TemplateSensor | Sections.TemplateBinarySensor);
+
+                    break;
+                case Sections.InputNumber:
+                case Sections.InputSelect:
+                    if (line.StartsWith($"  {SungrowSetIdPrefix}"))
+                    {
+                        string id = line.Trim().TrimEnd(':');
+
+                        string newId = GetNewSetId(id, index);
+
+                        line = ReplaceAndAddToReplacements(line, section, id, newId);
+                    }
+                    else
+                    {
+                        line = TestReplacements(line, Sections.Modbus | Sections.TemplateSensor | Sections.TemplateBinarySensor | Sections.InputNumber);
+                    }
+
+                    break;
+                case Sections.Automation:
+                    if (line.Trim().StartsWith($"- {AutomaticIdPrefix} \"{AutomationIdNamePrefix}") || line.Trim().StartsWith($"- {AutomaticIdPrefix} {AutomationIdNamePrefix}"))
+                    {
+                        string id = GetAutomationId(line);
+                        string newId = GetNewAutomationId(id, index);
+
+                        line = ReplaceAndAddToReplacements(line, section, id, newId);
+                    }
+                    else
+                    {
+                        line = TestReplacements(line, Sections.Modbus | Sections.TemplateSensor | Sections.TemplateBinarySensor | Sections.InputNumber | Sections.InputSelect | Sections.Automation);
+                    }
+
+                    break;
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(section), section, null);
+            }
+
+            return line;
+        }
+
+        private string ReplaceAndAddToReplacements(string line, Sections section, string oldString, string newString)
+        {
+            AddReplacement(oldString, newString, section);
+
+            return line.Replace(oldString, newString);
+        }
+
         private static Sections TestForNewSection(Sections currentSection, string line)
         {
             foreach (Sections section in EnumHelper<Sections>.GetValues().Where(s => s != Sections.None))
@@ -369,8 +512,17 @@ namespace TextParse.Commands
                 switch (section)
                 {
                     case Sections.TemplateBinarySensor:
-                    case Sections.TemplateSensor:
                         if (currentSection == Sections.Template)
+                        {
+                            if (line.StartsWith(header))
+                            {
+                                return section;
+                            }
+                        }
+
+                        break;
+                    case Sections.TemplateSensor:
+                        if (currentSection == Sections.TemplateBinarySensor)
                         {
                             if (line.StartsWith(header))
                             {

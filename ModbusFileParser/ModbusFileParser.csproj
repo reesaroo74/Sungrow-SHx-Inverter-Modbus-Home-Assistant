@@ -2,7 +2,7 @@
   <PropertyGroup>
     <ProjectGuid>{A2B1F9B6-9DBD-4117-9546-3F4A661C9ED5}</ProjectGuid>
     <OutputType>Exe</OutputType>
-    <TargetFramework>net48</TargetFramework>
+    <TargetFramework>net47</TargetFramework>
     <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
     <AssemblyTitle>TextParse</AssemblyTitle>
     <Product>TextParse</Product>
@@ -16,4 +16,9 @@
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
     <DebugType>pdbonly</DebugType>
   </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="YamlDotNet" Version="13.7.1" />
+  </ItemGroup>
+
 </Project>

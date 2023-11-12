@@ -5,11 +5,15 @@ EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "yaml", "yaml", "{BF7D2F15-B66B-416B-957A-3F990861A561}"
 	ProjectSection(SolutionItems) = preProject
 		modbus_sungrow.yaml = modbus_sungrow.yaml
-		modbus_sungrow_shed.yaml = modbus_sungrow_shed.yaml
-		modbus_sungrow_garage.yaml = modbus_sungrow_garage.yaml
 		secrets.yaml = secrets.yaml
 		secrets_multi.yaml = secrets_multi.yaml
 		modbus_sungrow_reversedId.yaml = modbus_sungrow_reversedId.yaml
+		modbus_sungrow_1.yaml = modbus_sungrow_1.yaml
+		modbus_sungrow_2.yaml = modbus_sungrow_2.yaml
+		total_templates_1.yaml = total_templates_1.yaml
+		total_templates_all.yaml = total_templates_all.yaml
+		modbus_sungrow_garage.yaml = modbus_sungrow_garage.yaml
+		modbus_sungrow_shed.yaml = modbus_sungrow_shed.yaml
 	EndProjectSection
 EndProject
 Global
